@@ -1,0 +1,41 @@
+<!DOCTYPE html>
+<html>
+<head>
+    <title>Patient Portal</title>
+    <style>
+        body { font-family: Arial; max-width: 800px; margin: 50px auto; }
+        input, button { padding: 10px; margin: 5px; }
+        .patient { border: 1px solid #ccc; padding: 10px; margin: 10px 0; }
+    </style>
+</head>
+<body>
+    <h1>Patient Portal</h1>
+    
+    <div>
+        <input type="text" id="patientName" placeholder="Patient Name">
+        <button onclick="addPatient()">Add Patient</button>
+    </div>
+    
+    <div id="patientList"></div>
+
+    <script>
+        let patients = [];
+        
+        function addPatient() {
+            const name = document.getElementById('patientName').value;
+            if (name) {
+                patients.push({ id: Date.now(), name: name });
+                document.getElementById('patientName').value = '';
+                displayPatients();
+            }
+        }
+        
+        function displayPatients() {
+            const list = document.getElementById('patientList');
+            list.innerHTML = patients.map(p => 
+                `<div class="patient" data-testid="patient-${p.id}">${p.name}</div>`
+            ).join('');
+        }
+    </script>
+</body>
+</html>
