@@ -51,17 +51,17 @@ jobs:
       - name: Run tests in Docker
         id: test
         run: |
-          docker run --name test-container \
+          docker run --name test-container-${{ matrix.browser }}-${{ matrix.shard }} \
             patient-portal-test:${{ github.sha }} \
             npx playwright test --project=${{ matrix.browser }} --shard=${{ matrix.shard }}/2
       
       - name: Copy test results from container
         if: always()
         run: |
-          docker cp test-container:/app/test-results ./test-results || echo "No test-results"
-          docker cp test-container:/app/playwright-report ./playwright-report || echo "No playwright-report"
+          docker cp test-container-${{ matrix.browser }}-${{ matrix.shard }}:/app/test-results ./test-results || echo "No test-results"
+          docker cp test-container-${{ matrix.browser }}-${{ matrix.shard }}:/app/playwright-report ./playwright-report || echo "No playwright-report"
       
-      - name: Upload test results to GitHub
+      - name: Upload test results
         if: always()
         uses: actions/upload-artifact@v4
         with:
@@ -71,30 +71,12 @@ jobs:
             playwright-report/
           if-no-files-found: warn
       
-      - name: Configure AWS credentials
-        if: always()
-        uses: aws-actions/configure-aws-credentials@v4
-        with:
-          aws-access-key-id: ${{ secrets.AWS_ACCESS_KEY_ID }}
-          aws-secret-access-key: ${{ secrets.AWS_SECRET_ACCESS_KEY }}
-          aws-region: us-east-1
-      
-      - name: Upload test results to S3
-        if: always()
-        run: |
-          if [ -d "test-results" ]; then
-            aws s3 cp test-results/ \
-              s3://${{ secrets.AWS_BUCKET_NAME }}/runs/${{ github.run_number }}/${{ matrix.browser }}-shard${{ matrix.shard }}/ \
-              --recursive
-            echo "✅ Results uploaded to S3"
-          fi
-      
       - name: Cleanup
         if: always()
-        run: docker rm test-container || true
+        run: docker rm test-container-${{ matrix.browser }}-${{ matrix.shard }} || true
 
   summary:
-    name: Test Summary
+    name: All Tests Complete
     runs-on: ubuntu-latest
     needs: test-in-docker
     if: always()
@@ -102,6 +84,5 @@ jobs:
     steps:
       - name: Summary
         run: |
-          echo "✅ All tests completed"
-          echo "📊 Results available in GitHub Artifacts and AWS S3"
-          echo "🐳 All tests ran in Docker containers for consistency"
+          echo "✅ All tests completed in Docker containers"
+          echo "🐳 True environment consistency achieved"
