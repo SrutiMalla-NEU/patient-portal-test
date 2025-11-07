@@ -2,11 +2,20 @@ module.exports = {
   testDir: './tests',
   timeout: 30000,
   retries: 1,
+  
+  reporter: [
+    ['html'],
+    ['json', { outputFile: 'test-results/results.json' }],
+    ['junit', { outputFile: 'test-results/results.xml' }]
+  ],
+  
   use: {
     headless: true,
-    screenshot: 'only-on-failure',
-    video: 'retain-on-failure',
+    screenshot: 'on',
+    video: 'on',
+    trace: 'on',
   },
+  
   projects: [
     {
       name: 'chromium',
