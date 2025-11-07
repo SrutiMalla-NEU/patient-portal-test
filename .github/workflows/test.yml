@@ -7,91 +7,43 @@ on:
     branches: [ main ]
 
 jobs:
-  smoke-test:
-    name: Smoke Tests (PR only)
-    runs-on: ubuntu-latest
-    if: github.event_name == 'pull_request'
-    
-    steps:
-      - name: Checkout code
-        uses: actions/checkout@v3
-      
-      - name: Setup Node.js
-        uses: actions/setup-node@v3
-        with:
-          node-version: '18'
-      
-      - name: Install dependencies
-        run: npm install
-      
-      - name: Install Playwright browsers
-        run: npx playwright install --with-deps
-      
-      - name: Run smoke tests (chromium only)
-        run: npx playwright test --project=chromium
-      
-      - name: Upload test results
-        if: always()
-        uses: actions/upload-artifact@v4
-        with:
-          name: smoke-test-results
-          path: test-results/
-
-  full-regression:
-    name: Full Regression Tests
-    runs-on: ubuntu-latest
-    if: github.event_name == 'push'
-    
-    strategy:
-      matrix:
-        browser: [chromium, firefox, webkit]
-        shard: [1/2, 2/2]
-    
-    steps:
-      - name: Checkout code
-        uses: actions/checkout@v3
-      
-      - name: Setup Node.js
-        uses: actions/setup-node@v3
-        with:
-          node-version: '18'
-          cache: 'npm'
-      
-      - name: Install dependencies
-        run: npm ci
-      
-      - name: Install Playwright browsers
-        run: npx playwright install --with-deps
-      
-      - name: Run tests on ${{ matrix.browser }} (shard ${{ matrix.shard }})
-        run: npx playwright test --project=${{ matrix.browser }} --shard=${{ matrix.shard }}
-      
-      - name: Upload test results
-        if: always()
-        uses: actions/upload-artifact@v4
-        with:
-          name: test-results-${{ matrix.browser }}-${{ matrix.shard }}
-          path: test-results/
-      
-      - name: Upload artifacts to S3 (simulated)
-        if: always()
-        run: echo "Would upload to AWS S3 here - aws s3 cp test-results/ s3://my-bucket/test-results/"
-
-  docker-build:
+  build-docker:
     name: Build Docker Image
     runs-on: ubuntu-latest
-    needs: full-regression
-    if: github.event_name == 'push'
     
     steps:
-      - name: Checkout code
-        uses: actions/checkout@v3
+      - uses: actions/checkout@v4
       
-      - name: Build Docker image
-        run: docker build -t patient-portal-test:latest .
+      - name: Build and push to registry
+        run: |
+          docker build -t patient-portal-test:${{ github.sha }} .
+          docker save patient-portal-test:${{ github.sha }} > image.tar
+      
+      - name: Upload Docker image
+        uses: actions/upload-artifact@v4
+        with:
+          name: docker-image
+          path: image.tar
+
+  test-in-docker:
+    name: Tests (${{ matrix.browser }}-${{ matrix.shard }})
+    runs-on: ubuntu-latest
+    needs: build-docker
+    
+    strategy:
+      fail-fast: false
+      matrix:
+        browser: [chromium, firefox, webkit]
+        shard: [1, 2]
+    
+    steps:
+      - name: Download Docker image
+        uses: actions/download-artifact@v4
+        with:
+          name: docker-image
+      
+      - name: Load Docker image
+        run: docker load < image.tar
       
       - name: Run tests in Docker
-        run: docker run patient-portal-test:latest
-      
-      - name: Push to registry (simulated)
-        run: echo "Would push to Docker Hub/ECR here - docker push patient-portal-test:latest"
+        run: docker run patient-portal-test:${{ github.sha }} npx playwright test --project=${{ matrix.browser }} --shard=${{ matrix.shard }}/2
