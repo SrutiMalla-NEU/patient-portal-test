@@ -12,21 +12,24 @@ jobs:
     runs-on: ubuntu-latest
     
     steps:
-      - uses: actions/checkout@v4
+      - name: Checkout code
+        uses: actions/checkout@v4
       
-      - name: Build and push to registry
-        run: |
-          docker build -t patient-portal-test:${{ github.sha }} .
-          docker save patient-portal-test:${{ github.sha }} > image.tar
+      - name: Build Docker image
+        run: docker build -t patient-portal-test:${{ github.sha }} .
       
-      - name: Upload Docker image
+      - name: Save Docker image
+        run: docker save patient-portal-test:${{ github.sha }} -o docker-image.tar
+      
+      - name: Upload Docker image artifact
         uses: actions/upload-artifact@v4
         with:
           name: docker-image
-          path: image.tar
+          path: docker-image.tar
+          retention-days: 1
 
   test-in-docker:
-    name: Tests (${{ matrix.browser }}-${{ matrix.shard }})
+    name: Test (${{ matrix.browser }}-${{ matrix.shard }})
     runs-on: ubuntu-latest
     needs: build-docker
     
@@ -43,7 +46,62 @@ jobs:
           name: docker-image
       
       - name: Load Docker image
-        run: docker load < image.tar
+        run: docker load -i docker-image.tar
       
       - name: Run tests in Docker
-        run: docker run patient-portal-test:${{ github.sha }} npx playwright test --project=${{ matrix.browser }} --shard=${{ matrix.shard }}/2
+        id: test
+        run: |
+          docker run --name test-container \
+            patient-portal-test:${{ github.sha }} \
+            npx playwright test --project=${{ matrix.browser }} --shard=${{ matrix.shard }}/2
+      
+      - name: Copy test results from container
+        if: always()
+        run: |
+          docker cp test-container:/app/test-results ./test-results || echo "No test-results"
+          docker cp test-container:/app/playwright-report ./playwright-report || echo "No playwright-report"
+      
+      - name: Upload test results to GitHub
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: results-${{ matrix.browser }}-${{ matrix.shard }}
+          path: |
+            test-results/
+            playwright-report/
+          if-no-files-found: warn
+      
+      - name: Configure AWS credentials
+        if: always()
+        uses: aws-actions/configure-aws-credentials@v4
+        with:
+          aws-access-key-id: ${{ secrets.AWS_ACCESS_KEY_ID }}
+          aws-secret-access-key: ${{ secrets.AWS_SECRET_ACCESS_KEY }}
+          aws-region: us-east-1
+      
+      - name: Upload test results to S3
+        if: always()
+        run: |
+          if [ -d "test-results" ]; then
+            aws s3 cp test-results/ \
+              s3://${{ secrets.AWS_BUCKET_NAME }}/runs/${{ github.run_number }}/${{ matrix.browser }}-shard${{ matrix.shard }}/ \
+              --recursive
+            echo "✅ Results uploaded to S3"
+          fi
+      
+      - name: Cleanup
+        if: always()
+        run: docker rm test-container || true
+
+  summary:
+    name: Test Summary
+    runs-on: ubuntu-latest
+    needs: test-in-docker
+    if: always()
+    
+    steps:
+      - name: Summary
+        run: |
+          echo "✅ All tests completed"
+          echo "📊 Results available in GitHub Artifacts and AWS S3"
+          echo "🐳 All tests ran in Docker containers for consistency"
